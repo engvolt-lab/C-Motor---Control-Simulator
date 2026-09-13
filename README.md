@@ -8,7 +8,7 @@ A professional C++17 simulation of closed-loop PID speed control for a brushed D
 
 ## Architecture
 
-![DC Motor Closed-Loop Control System Architecture](./architecture.svg)
+
 
 ### System Signal Flow
 
