@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DC Motor Closed-Loop Simulation Dashboard</title>
+<style>
+  :root {
+    --bg-primary: #0f172a;
+    --bg-secondary: #1e293b;
+    --bg-card: #1e293b;
+    --text-primary: #f8fafc;
+    --text-muted: #94a3b8;
+    --accent-blue: #38bdf8;
+    --accent-green: #4ade80;
+    --accent-amber: #fbbf24;
+    --accent-red: #f87171;
+    --border: #334155;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    padding: 24px;
+    min-height: 100vh;
+  }
+  header {
+    margin-bottom: 24px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  h1 { font-size: 24px; font-weight: 700; color: var(--accent-blue); }
+  .badge {
+    padding: 6px 14px;
+    border-radius: 9999px;
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 0.05em;
+  }
+  .badge-ok { background: #065f46; color: #34d399; }
+  .badge-fault { background: #7f1d1d; color: #f87171; animation: pulse 1s infinite alternate; }
+  @keyframes pulse { from { opacity: 0.7; } to { opacity: 1; } }
+
+  .grid {
+    display: grid;
+    grid-template-columns: 340px 1fr;
+    gap: 24px;
+  }
+  .card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+  .card h2 {
+    font-size: 16px;
+    color: var(--accent-blue);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 16px;
+  }
+  .control-group {
+    margin-bottom: 16px;
+  }
+  label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 14px;
+    margin-bottom: 6px;
+    color: var(--text-muted);
+  }
+  .val-badge { color: var(--text-primary); font-weight: 600; }
+  input[type=range] {
+    width: 100%;
+    accent-color: var(--accent-blue);
+  }
+  .btn-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-top: 14px;
+  }
+  button {
+    padding: 10px;
+    border: 1px solid var(--border);
+    background: #334155;
+    color: white;
+    font-weight: 600;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  button:hover { background: #475569; }
+  button.danger { background: #991b1b; border-color: #dc2626; }
+  button.danger:hover { background: #b91c1c; }
+  button.success { background: #065f46; border-color: #059669; }
+  button.success:hover { background: #047857; }
+
+  /* Telemetry Cards */
+  .metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+  .metric-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+  }
+  .metric-label { font-size: 12px; color: var(--text-muted); text-transform: uppercase; }
+  .metric-val { font-size: 26px; font-weight: 700; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .metric-unit { font-size: 14px; color: var(--text-muted); font-weight: normal; margin-left: 4px; }
+
+  canvas {
+    width: 100%;
+    height: 320px;
+    background: #090d16;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>Closed-Loop DC Motor Control Simulation</h1>
+    <p style="color: var(--text-muted); font-size: 14px; margin-top: 4px;">Physics Model: 1st Order Electrical + Lumped Thermal + PID + Latched Safety Protection</p>
+  </div>
+  <div id="statusBadge" class="badge badge-ok">STATUS: NOMINAL (OK)</div>
+</header>
+
+<div class="grid">
+  <!-- Left Column: Controls -->
+  <div>
+    <div class="card">
+      <h2>Simulation Inputs</h2>
+
+      <div class="control-group">
+        <label>Target Speed <span class="val-badge" id="targetRPMVal">1500 RPM</span></label>
+        <input type="range" id="targetRPMSlider" min="0" max="3500" step="50" value="1500">
+      </div>
+
+      <div class="control-group">
+        <label>Load Torque <span class="val-badge" id="loadTorqueVal">0.010 N·m</span></label>
+        <input type="range" id="loadTorqueSlider" min="0" max="0.25" step="0.005" value="0.01">
+      </div>
+
+      <div class="control-group">
+        <label>Acceleration Ramp <span class="val-badge" id="rampVal">800 RPM/s</span></label>
+        <input type="range" id="rampSlider" min="100" max="2500" step="100" value="800">
+      </div>
+
+      <div class="btn-row">
+        <button id="btnPlayPause" class="success">Pause</button>
+        <button id="btnResetAll">Reset Sim</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Safety Fault Triggers</h2>
+      <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">Trigger faults to observe automatic cut-off and fault latching:</p>
+      <div class="btn-row">
+        <button id="btnEStop" class="danger">Emergency Stop</button>
+        <button id="btnEncoderFail">Fail Encoder</button>
+      </div>
+      <div class="btn-row">
+        <button id="btnOverload">Overcurrent (Load 0.25)</button>
+        <button id="btnResetSafety" class="success">Reset Safety</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Right Column: Outputs & Live Visualisation -->
+  <div>
+    <div class="metrics-grid">
+      <div class="metric-card">
+        <div class="metric-label">Actual Speed</div>
+        <div class="metric-val" id="metricRPM" style="color: var(--accent-blue)">0.0<span class="metric-unit">RPM</span></div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Speed Error</div>
+        <div class="metric-val" id="metricError" style="color: var(--accent-amber)">0.0<span class="metric-unit">RPM</span></div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Armature Current</div>
+        <div class="metric-val" id="metricCurrent" style="color: var(--accent-green)">0.00<span class="metric-unit">A</span></div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Winding Temperature</div>
+        <div class="metric-val" id="metricTemp" style="color: var(--accent-red)">25.0<span class="metric-unit">°C</span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Real-Time Telemetry Graph (RPM & Current)</h2>
+      <canvas id="graphCanvas"></canvas>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── DC Motor Simulation Engine (Identical physics to C++ model) ──
+const params = {
+  R: 1.0, Ke: 0.01, Kt: 0.01, J: 0.001, B: 0.0001,
+  Rth: 0.5, tau_th: 20.0, Tamb: 25.0,
+  maxCurrent: 15.0, maxTemp: 80.0, maxRPM: 3500.0,
+  dt: 0.02
+};
+
+let state = {
+  time: 0,
+  targetRPM: 1500,
+  currentSetpoint: 0,
+  rampRate: 800,
+  loadTorque: 0.01,
+  omega: 0,
+  current: 0,
+  temp: 25.0,
+  integral: 0,
+  prevError: 0,
+  encoderOk: true,
+  tripped: false,
+  faultStr: 'OK',
+  paused: false
+};
+
+const history = { rpm: [], target: [], current: [], temp: [], maxPoints: 150 };
+
+function computePID(setpoint, measured, dt) {
+  const kp = 0.01, ki = 0.05, kd = 0.001;
+  const error = setpoint - measured;
+  state.integral += error * dt;
+  state.integral = Math.max(-200, Math.min(200, state.integral));
+  const dTerm = (error - state.prevError) / dt;
+  state.prevError = error;
+  let out = kp * error + ki * state.integral + kd * dTerm;
+  return Math.max(0, Math.min(48, out));
+}
+
+function updatePhysics() {
+  if (state.paused) return;
+
+  const dt = params.dt;
+  state.time += dt;
+
+  // Ramp limiter
+  if (state.currentSetpoint < state.targetRPM) {
+    state.currentSetpoint = Math.min(state.currentSetpoint + state.rampRate * dt, state.targetRPM);
+  } else {
+    state.currentSetpoint = Math.max(state.currentSetpoint - state.rampRate * dt, state.targetRPM);
+  }
+
+  // Encoder
+  const trueRPM = state.omega * (60.0 / (2.0 * Math.PI));
+  const measuredRPM = state.encoderOk ? (trueRPM + (Math.random() - 0.5) * 1.5) : 0.0;
+
+  // Safety
+  if (state.current > params.maxCurrent) { state.tripped = true; state.faultStr = 'FAULT: OVERCURRENT'; }
+  if (state.temp > params.maxTemp) { state.tripped = true; state.faultStr = 'FAULT: OVERTEMPERATURE'; }
+  if (trueRPM > params.maxRPM) { state.tripped = true; state.faultStr = 'FAULT: OVERSPEED'; }
+  if (!state.encoderOk) { state.tripped = true; state.faultStr = 'FAULT: ENCODER_FAILURE'; }
+
+  // PID
+  let voltage = 0.0;
+  if (!state.tripped) {
+    voltage = computePID(state.currentSetpoint, measuredRPM, dt);
+  }
+
+  // Motor physics
+  const backEmf = params.Ke * state.omega;
+  state.current = Math.max((voltage - backEmf) / params.R, 0.0);
+  const tauMotor = params.Kt * state.current;
+  const netTorque = tauMotor - state.loadTorque - params.B * state.omega;
+  const alpha = netTorque / params.J;
+  state.omega = Math.max(0.0, state.omega + alpha * dt);
+
+  // Thermal
+  const pDiss = state.current * state.current * params.R;
+  const dTemp = (pDiss * params.Rth - (state.temp - params.Tamb)) / params.tau_th;
+  state.temp += dTemp * dt;
+
+  // History buffer
+  const dispRPM = state.omega * (60.0 / (2.0 * Math.PI));
+  history.rpm.push(dispRPM);
+  history.target.push(state.targetRPM);
+  history.current.push(state.current);
+  history.temp.push(state.temp);
+  if (history.rpm.length > history.maxPoints) {
+    history.rpm.shift(); history.target.shift(); history.current.shift(); history.temp.shift();
+  }
+
+  // Update UI
+  document.getElementById('metricRPM').innerHTML = `${dispRPM.toFixed(1)}<span class="metric-unit">RPM</span>`;
+  document.getElementById('metricError').innerHTML = `${(state.targetRPM - dispRPM).toFixed(1)}<span class="metric-unit">RPM</span>`;
+  document.getElementById('metricCurrent').innerHTML = `${state.current.toFixed(2)}<span class="metric-unit">A</span>`;
+  document.getElementById('metricTemp').innerHTML = `${state.temp.toFixed(1)}<span class="metric-unit">°C</span>`;
+
+  const badge = document.getElementById('statusBadge');
+  if (state.tripped) {
+    badge.className = 'badge badge-fault';
+    badge.innerText = state.faultStr;
+  } else {
+    badge.className = 'badge badge-ok';
+    badge.innerText = 'STATUS: NOMINAL (OK)';
+  }
+}
+
+// ── Graph Rendering ──
+const canvas = document.getElementById('graphCanvas');
+const ctx = canvas.getContext('2d');
+
+function drawGraph() {
+  canvas.width = canvas.clientWidth * window.devicePixelRatio;
+  canvas.height = canvas.clientHeight * window.devicePixelRatio;
+  const W = canvas.width, H = canvas.height;
+
+  ctx.clearRect(0, 0, W, H);
+
+  // Grid
+  ctx.strokeStyle = '#1e293b';
+  ctx.lineWidth = 1;
+  for (let y = 0; y < H; y += H / 5) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+  }
+
+  if (history.rpm.length < 2) return;
+
+  const maxRPM = 3500;
+  const stepX = W / (history.maxPoints - 1);
+
+  // Draw Target Line
+  ctx.strokeStyle = '#64748b';
+  ctx.setLineDash([4, 4]);
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  for (let i = 0; i < history.target.length; ++i) {
+    const x = i * stepX;
+    const y = H - (history.target[i] / maxRPM) * (H - 20) - 10;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Draw Actual RPM
+  ctx.strokeStyle = '#38bdf8';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  for (let i = 0; i < history.rpm.length; ++i) {
+    const x = i * stepX;
+    const y = H - (history.rpm[i] / maxRPM) * (H - 20) - 10;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+
+  // Legend
+  ctx.font = '14px sans-serif';
+  ctx.fillStyle = '#38bdf8';
+  ctx.fillText('Actual RPM', 20, 25);
+  ctx.fillStyle = '#64748b';
+  ctx.fillText('-- Target RPM', 130, 25);
+}
+
+// ── UI Listeners ──
+document.getElementById('targetRPMSlider').addEventListener('input', (e) => {
+  state.targetRPM = parseFloat(e.target.value);
+  document.getElementById('targetRPMVal').innerText = `${state.targetRPM} RPM`;
+});
+document.getElementById('loadTorqueSlider').addEventListener('input', (e) => {
+  state.loadTorque = parseFloat(e.target.value);
+  document.getElementById('loadTorqueVal').innerText = `${state.loadTorque.toFixed(3)} N·m`;
+});
+document.getElementById('rampSlider').addEventListener('input', (e) => {
+  state.rampRate = parseFloat(e.target.value);
+  document.getElementById('rampVal').innerText = `${state.rampRate} RPM/s`;
+});
+document.getElementById('btnPlayPause').addEventListener('click', (e) => {
+  state.paused = !state.paused;
+  e.target.innerText = state.paused ? 'Resume' : 'Pause';
+  e.target.className = state.paused ? '' : 'success';
+});
+document.getElementById('btnResetAll').addEventListener('click', () => {
+  state.omega = 0; state.current = 0; state.temp = 25.0;
+  state.integral = 0; state.prevError = 0; state.tripped = false;
+  state.encoderOk = true; state.faultStr = 'OK'; state.currentSetpoint = 0;
+});
+document.getElementById('btnEStop').addEventListener('click', () => {
+  state.tripped = true; state.faultStr = 'FAULT: EMERGENCY_STOP';
+});
+document.getElementById('btnEncoderFail').addEventListener('click', () => {
+  state.encoderOk = false;
+});
+document.getElementById('btnOverload').addEventListener('click', () => {
+  state.loadTorque = 0.25;
+  document.getElementById('loadTorqueSlider').value = 0.25;
+  document.getElementById('loadTorqueVal').innerText = '0.250 N·m';
+});
+document.getElementById('btnResetSafety').addEventListener('click', () => {
+  state.tripped = false; state.encoderOk = true; state.faultStr = 'OK';
+});
+
+// Main Animation Loop
+setInterval(() => {
+  updatePhysics();
+  drawGraph();
+}, 20);
+</script>
+
+</body>
+</html>
